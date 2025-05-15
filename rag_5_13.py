@@ -105,7 +105,7 @@ drive.mount('/content/drive')
 # =============================
 class Config:
     # 多线程配置
-    NUM_WORKERS = 4
+    NUM_WORKERS = 20
     USE_MULTITHREAD = True
 
     # 路径配置
@@ -348,7 +348,14 @@ print(len(dynamic_text_chunks))
 
 print(dynamic_text_chunks[0])
 
-"""# Vector DB"""
+"""# Vector DB
+
+修改权限 防止无法对原来的数据库进行插入
+"""
+
+!find /content/drive/MyDrive/513/chroma_db/ -name "*.lock" -delete
+
+!chmod -R 775 /content/drive/MyDrive/513/chroma_db/
 
 # %load_ext line_profiler
 
@@ -360,7 +367,7 @@ class VectorDBManager:
     def __init__(self):
         self.pdf_texter = PDFProcessor()
         self.chunker = TextChunker()
-        self.client = chromadb.PersistentClient(path=Config.DB_PATH)
+        self.client = self._init_client()
         self.embedder = self._init_embedder()
         self.collection = self._init_collection()
         self.insert_executor = ThreadPoolExecutor(max_workers=Config.NUM_WORKERS)
@@ -371,8 +378,21 @@ class VectorDBManager:
         model.max_seq_length = Config.MAX_SEQ_LENGTH
         return model
 
+    def _init_client(self):
+        settings = chromadb.config.Settings(
+          persist_directory=Config.DB_PATH,
+          anonymized_telemetry=False,
+          allow_reset=True,  # 允许重置数据库
+          # enable_lock=False   # 禁用文件锁（针对Colab环境）
+          )
+
+        return chromadb.PersistentClient(settings=settings)
+
+
     def _init_collection(self):
         """初始化数据库集合"""
+
+
         embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name=Config.EMBEDDING_MODEL,
             device="cuda",
@@ -381,7 +401,7 @@ class VectorDBManager:
         return self.client.get_or_create_collection(
             name=Config.COLLECTION_NAME,
             embedding_function=embedding_func,
-            metadata={"hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine"},
         )
 
     #生成向量
@@ -615,6 +635,23 @@ class VectorDBManager:
 text_db = VectorDBManager()
 
 text_db.pdf_processor("/content/drive/MyDrive/513/Maotai_2024.pdf")
+
+def process_pdfs(folder_path: str):
+
+    files = [f for f in os.listdir(folder_path)]
+
+    for file in files:
+            try:
+                # 构建完整路径
+                file_path = os.path.join(folder_path, file)
+                text_db.pdf_processor(file_path)
+            except Exception as e:
+                print(f"处理失败：{file} | 错误：{str(e)}")
+
+process_pdfs("/content/drive/MyDrive/513/A50_pdfs_named/")
+
+from google.colab import runtime
+runtime.unassign()
 
 answers = text_db.search("贵州茅台2024年净利润")
 
